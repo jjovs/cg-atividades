@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Flor, Robô e Carro — WebGL2</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#1e1e2e; color:#eee; padding:20px; }
+  .container { display:flex; flex-wrap:wrap; gap:24px; }
+  .cena { text-align:center; }
+  .cena h2 { font-size:1rem; margin:0 0 8px; }
+  canvas { background:#fff; border-radius:10px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="cena"><h2>Flor</h2><canvas id="flor" width="300" height="300"></canvas></div>
+  <div class="cena"><h2>Robô</h2><canvas id="robo" width="300" height="300"></canvas></div>
+  <div class="cena"><h2>Carro</h2><canvas id="carro" width="300" height="300"></canvas></div>
+</div>
+
+<script>
+const VS = `#version 300 es
+  in vec2 aPosition;
+  in vec3 aCor;
+  out vec3 vColor;
+  void main() {
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+    vColor = aCor;
+  }
+`;
+
+const FS = `#version 300 es
+  precision mediump float;
+  in vec3 vColor;
+  out vec4 outColor;
+  void main() {
+    outColor = vec4(vColor, 1.0);
+  }
+`;
+
+function compilarShader(gl, tipo, fonte) {
+  const shader = gl.createShader(tipo);
+  gl.shaderSource(shader, fonte);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(shader));
+  return shader;
+}
+
+function criarPrograma(gl) {
+  const vs = compilarShader(gl, gl.VERTEX_SHADER, VS);
+  const fs = compilarShader(gl, gl.FRAGMENT_SHADER, FS);
+  const programa = gl.createProgram();
+  gl.attachShader(programa, vs);
+  gl.attachShader(programa, fs);
+  gl.linkProgram(programa);
+  if (!gl.getProgramParameter(programa, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(programa));
+  return programa;
+}
+
+function retangulo(x, y, w, h) {
+  return [x,y, x+w,y, x,y+h,  x,y+h, x+w,y, x+w,y+h];
+}
+function circulo(cx, cy, r, segmentos = 12) {
+  const pontos = [cx, cy];
+  for (let i = 0; i <= segmentos; i++) {
+    const ang = (i / segmentos) * Math.PI * 2;
+    pontos.push(cx + Math.cos(ang) * r, cy + Math.sin(ang) * r);
+  }
+  return pontos;
+}
+function poligono(pts) { return pts; }
+function paraCor(xy, cor) {
+  const out = [];
+  for (let i = 0; i < xy.length; i += 2) out.push(xy[i], xy[i+1], cor[0], cor[1], cor[2]);
+  return out;
+}
+
+function desenharCena(idCanvas, formas) {
+  const canvas = document.getElementById(idCanvas);
+  const gl = canvas.getContext('webgl2');
+  gl.viewport(0, 0, canvas.width, canvas.height);
+
+  const programa = criarPrograma(gl);
+  gl.useProgram(programa);
+
+  const posLoc = gl.getAttribLocation(programa, 'aPosition');
+  const corLoc = gl.getAttribLocation(programa, 'aCor');
+  const STRIDE = 5 * 4;
+
+  gl.clearColor(1, 1, 1, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.enableVertexAttribArray(posLoc);
+  gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, STRIDE, 0);
+  gl.enableVertexAttribArray(corLoc);
+  gl.vertexAttribPointer(corLoc, 3, gl.FLOAT, false, STRIDE, 2 * 4);
+
+  for (const forma of formas) {
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(forma.pontos), gl.STATIC_DRAW);
+    const modoGL = forma.modo === 'FAN' ? gl.TRIANGLE_FAN : gl.TRIANGLES;
+    gl.drawArrays(modoGL, 0, forma.pontos.length / 5);
+  }
+}
+
+const formasFlor = [
+  { pontos: paraCor(retangulo(-0.05, -0.8, 0.10, 0.7), [0.20, 0.55, 0.25]), modo: 'TRIANGLES' },
+];
+for (let i = 0; i < 5; i++) {
+  const ang = i * (Math.PI * 2 / 5);
+  const px = 0 + Math.cos(ang) * 0.30;
+  const py = 0.2 + Math.sin(ang) * 0.30;
+  formasFlor.push({ pontos: paraCor(circulo(px, py, 0.20, 12), [0.95, 0.42, 0.62]), modo: 'FAN' });
+}
+formasFlor.push({ pontos: paraCor(circulo(0, 0.2, 0.14, 12), [1, 0.85, 0.2]), modo: 'FAN' });
+
+const formasRobo = [
+  { pontos: paraCor(retangulo(-0.30, -0.45, 0.60, 0.55), [0.55, 0.60, 0.68]), modo: 'TRIANGLES' },
+  { pontos: paraCor(retangulo(-0.20, 0.10, 0.40, 0.35), [0.75, 0.78, 0.85]), modo: 'TRIANGLES' },
+  { pontos: paraCor(retangulo(-0.22, -0.75, 0.18, 0.30), [0.35, 0.38, 0.45]), modo: 'TRIANGLES' },
+  { pontos: paraCor(retangulo(0.04, -0.75, 0.18, 0.30), [0.35, 0.38, 0.45]), modo: 'TRIANGLES' },
+  { pontos: paraCor(circulo(-0.08, 0.28, 0.05, 10), [0.20, 0.70, 0.90]), modo: 'FAN' },
+  { pontos: paraCor(circulo(0.08, 0.28, 0.05, 10), [0.20, 0.70, 0.90]), modo: 'FAN' },
+];
+
+const formasCarro = [
+  { pontos: paraCor(retangulo(-0.65, -0.20, 1.30, 0.28), [0.85, 0.25, 0.25]), modo: 'TRIANGLES' },
+  { pontos: paraCor(poligono([-0.30,0.08, -0.15,0.32, 0.15,0.32, 0.30,0.08]), [0.75, 0.20, 0.20]), modo: 'FAN' },
+  { pontos: paraCor(circulo(-0.35, -0.30, 0.13, 12), [0.15, 0.15, 0.15]), modo: 'FAN' },
+  { pontos: paraCor(circulo(0.35, -0.30, 0.13, 12), [0.15, 0.15, 0.15]), modo: 'FAN' },
+];
+
+desenharCena('flor', formasFlor);
+desenharCena('robo', formasRobo);
+desenharCena('carro', formasCarro);
+</script>
+</body>
+</html>
