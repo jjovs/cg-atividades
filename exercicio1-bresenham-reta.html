@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Exercício 1 - Bresenham (Retas)</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#1e1e2e; color:#eee; padding:20px; }
+  .container { display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start; }
+  canvas { background:#fff; border-radius:10px; cursor:crosshair; display:block; }
+  .painel { max-width:340px; font-size:0.9rem; line-height:1.5; }
+  .painel h1 { font-size:1.1rem; margin:0 0 8px; }
+  .painel h2 { font-size:0.95rem; margin:16px 0 6px; }
+  .painel ul { margin:0; padding-left:18px; }
+  .paleta { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .amostra { width:38px; height:38px; border-radius:6px; display:flex; align-items:center;
+             justify-content:center; font-size:0.8rem; font-weight:bold; color:#000; }
+  .amostra.ativa { outline:2px solid #fff; outline-offset:2px; }
+  #estado { margin-top:12px; font-family:ui-monospace, monospace; font-size:0.85rem; color:#c9c9e0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div><canvas id="tela" width="600" height="600"></canvas></div>
+
+  <div class="painel">
+    <h1>Exercício 1 — Retas com Bresenham</h1>
+    <p>A reta é traçada pixel a pixel pelo algoritmo de Bresenham
+       (<code>gl.POINTS</code>, sem usar <code>GL_LINES</code>).</p>
+
+    <h2>Uso</h2>
+    <ul>
+      <li>1º clique (botão esquerdo): ponto inicial</li>
+      <li>2º clique (botão esquerdo): ponto final — a reta é traçada</li>
+      <li>Teclas <b>0</b> a <b>9</b>: alteram a cor da reta</li>
+    </ul>
+
+    <h2>Cores</h2>
+    <div class="paleta" id="paleta"></div>
+
+    <div id="estado"></div>
+  </div>
+</div>
+
+<script>
+const VS = `#version 300 es
+  in vec2 aPixel;
+  uniform vec2 uResolucao;
+  void main() {
+    // centro do pixel (+0.5) convertido de coordenadas de tela para clip space
+    vec2 clip = ((aPixel + 0.5) / uResolucao) * 2.0 - 1.0;
+    gl_Position = vec4(clip, 0.0, 1.0);
+    gl_PointSize = 1.0;
+  }
+`;
+
+const FS = `#version 300 es
+  precision mediump float;
+  uniform vec3 uCor;
+  out vec4 outColor;
+  void main() {
+    outColor = vec4(uCor, 1.0);
+  }
+`;
+
+function compilarShader(gl, tipo, fonte) {
+  const shader = gl.createShader(tipo);
+  gl.shaderSource(shader, fonte);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(shader));
+  return shader;
+}
+
+function criarPrograma(gl) {
+  const vs = compilarShader(gl, gl.VERTEX_SHADER, VS);
+  const fs = compilarShader(gl, gl.FRAGMENT_SHADER, FS);
+  const programa = gl.createProgram();
+  gl.attachShader(programa, vs);
+  gl.attachShader(programa, fs);
+  gl.linkProgram(programa);
+  if (!gl.getProgramParameter(programa, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(programa));
+  return programa;
+}
+
+// Cores indexadas nas teclas 0 a 9.
+const CORES = [
+  { nome: 'azul',     rgb: [0.10, 0.30, 0.95] }, // 0
+  { nome: 'vermelho', rgb: [0.90, 0.15, 0.15] }, // 1
+  { nome: 'verde',    rgb: [0.10, 0.65, 0.20] }, // 2
+  { nome: 'amarelo',  rgb: [0.95, 0.80, 0.10] }, // 3
+  { nome: 'magenta',  rgb: [0.90, 0.15, 0.75] }, // 4
+  { nome: 'ciano',    rgb: [0.10, 0.75, 0.85] }, // 5
+  { nome: 'laranja',  rgb: [0.95, 0.50, 0.10] }, // 6
+  { nome: 'roxo',     rgb: [0.55, 0.25, 0.85] }, // 7
+  { nome: 'marrom',   rgb: [0.50, 0.30, 0.15] }, // 8
+  { nome: 'preto',    rgb: [0.05, 0.05, 0.05] }, // 9
+];
+
+// Algoritmo de Bresenham (versão inteira, válida para os 8 octantes).
+// Devolve a lista de pixels [x0,y0, x1,y1, ...] que formam o segmento.
+function bresenham(x0, y0, x1, y1) {
+  const pixels = [];
+  let x = x0, y = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let erro = dx - dy;
+
+  while (true) {
+    pixels.push(x, y);
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * erro;
+    if (e2 > -dy) { erro -= dy; x += sx; }
+    if (e2 <  dx) { erro += dx; y += sy; }
+  }
+  return pixels;
+}
+
+const canvas = document.getElementById('tela');
+const gl = canvas.getContext('webgl2');
+const programa = criarPrograma(gl);
+gl.useProgram(programa);
+
+const posLoc = gl.getAttribLocation(programa, 'aPixel');
+const corLoc = gl.getUniformLocation(programa, 'uCor');
+const resLoc = gl.getUniformLocation(programa, 'uResolucao');
+
+const buffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+gl.viewport(0, 0, canvas.width, canvas.height);
+gl.uniform2f(resLoc, canvas.width, canvas.height);
+
+// Estado da reta corrente: começa em (0,0) - (0,0) na cor azul (índice 0).
+const reta = { x0: 0, y0: 0, x1: 0, y1: 0, cor: 0 };
+let cliqueInicial = null; // guarda o 1º clique enquanto o 2º não acontece
+
+// FUNÇÃO 1: traça uma linha entre dois pontos quaisquer usando Bresenham.
+function tracarLinha(x0, y0, x1, y1, cor) {
+  const pixels = bresenham(x0, y0, x1, y1);
+
+  gl.clearColor(1, 1, 1, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  gl.uniform3fv(corLoc, cor);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pixels), gl.STATIC_DRAW);
+  gl.drawArrays(gl.POINTS, 0, pixels.length / 2);
+}
+
+// FUNÇÃO 2: altera a cor da linha e a redesenha imediatamente.
+function alterarCor(indice) {
+  if (indice < 0 || indice >= CORES.length) return;
+  reta.cor = indice;
+  redesenhar();
+}
+
+function redesenhar() {
+  tracarLinha(reta.x0, reta.y0, reta.x1, reta.y1, CORES[reta.cor].rgb);
+  atualizarPainel();
+}
+
+// Converte a posição do mouse para coordenadas de pixel com origem
+// no canto inferior esquerdo (como em gluOrtho2D(0, w, 0, h)).
+function pixelDoMouse(evento) {
+  const area = canvas.getBoundingClientRect();
+  const escalaX = canvas.width / area.width;
+  const escalaY = canvas.height / area.height;
+  const x = Math.round((evento.clientX - area.left) * escalaX);
+  const y = Math.round(canvas.height - (evento.clientY - area.top) * escalaY);
+  return {
+    x: Math.min(Math.max(x, 0), canvas.width - 1),
+    y: Math.min(Math.max(y, 0), canvas.height - 1),
+  };
+}
+
+canvas.addEventListener('mousedown', (evento) => {
+  if (evento.button !== 0) return; // apenas o botão esquerdo
+  const p = pixelDoMouse(evento);
+
+  if (cliqueInicial === null) {
+    cliqueInicial = p;          // clique inicial: guarda o ponto de partida
+    atualizarPainel();
+  } else {
+    reta.x0 = cliqueInicial.x;  // clique final: a reta muda de posição
+    reta.y0 = cliqueInicial.y;
+    reta.x1 = p.x;
+    reta.y1 = p.y;
+    cliqueInicial = null;
+    redesenhar();
+  }
+});
+
+window.addEventListener('keydown', (evento) => {
+  if (evento.key >= '0' && evento.key <= '9') alterarCor(Number(evento.key));
+});
+
+// --- painel informativo ---
+const paleta = document.getElementById('paleta');
+CORES.forEach((cor, i) => {
+  const amostra = document.createElement('div');
+  amostra.className = 'amostra';
+  amostra.dataset.indice = i;
+  amostra.style.background = `rgb(${cor.rgb.map(c => Math.round(c * 255)).join(',')})`;
+  amostra.style.color = i === 9 ? '#fff' : '#000';
+  amostra.textContent = i;
+  amostra.title = cor.nome;
+  paleta.appendChild(amostra);
+});
+
+function atualizarPainel() {
+  document.querySelectorAll('.amostra').forEach((el) => {
+    el.classList.toggle('ativa', Number(el.dataset.indice) === reta.cor);
+  });
+  const pendente = cliqueInicial
+    ? `\naguardando clique final (início em ${cliqueInicial.x}, ${cliqueInicial.y})`
+    : '';
+  document.getElementById('estado').textContent =
+    `reta: (${reta.x0}, ${reta.y0}) - (${reta.x1}, ${reta.y1})\n` +
+    `cor: ${reta.cor} (${CORES[reta.cor].nome})` + pendente;
+}
+document.getElementById('estado').style.whiteSpace = 'pre-line';
+
+// Reta inicial: (0,0) - (0,0) em azul.
+redesenhar();
+</script>
+</body>
+</html>
