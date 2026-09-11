@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Pong - WebGL 2</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    background: #1e1e2e;
+    color: #eee;
+    padding: 20px;
+    text-align: center;
+  }
+  canvas { background: #000; border-radius: 10px; }
+  #placar { font-size: 2rem; font-weight: bold; letter-spacing: 2px; }
+  #mensagem { display: block; height: 1.4rem; color: #ffd866; font-weight: bold; }
+  .ajuda { font-size: 0.9rem; opacity: 0.7; margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<p>
+  <span id="placar">0 x 0</span>
+  <span id="mensagem"></span>
+</p>
+
+<canvas id="canvas" width="600" height="600"></canvas>
+
+<p class="ajuda">
+  Barra verde (esquerda): <b>W</b> / <b>S</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+  Barra azul (direita): <b>&uarr;</b> / <b>&darr;</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+  Partida at&eacute; <b>5 pontos</b> &mdash; <b>R</b> reinicia
+</p>
+
+<!-- ==================================================
+     BIBLIOTECA m3 (matrizes 3x3 em column-major)
+     ================================================== -->
+<script>
+const m3 = {
+
+    identity: function() {
+        return new Float32Array([
+            1, 0, 0,
+            0, 1, 0,
+            0, 0, 1
+        ]);
+    },
+
+    translation: function(tx, ty) {
+        return new Float32Array([
+             1,  0, 0,
+             0,  1, 0,
+            tx, ty, 1
+        ]);
+    },
+
+    rotation: function(anguloEmRadianos) {
+        const c = Math.cos(anguloEmRadianos);
+        const s = Math.sin(anguloEmRadianos);
+        return new Float32Array([
+             c, s, 0,
+            -s, c, 0,
+             0, 0, 1
+        ]);
+    },
+
+    scaling: function(sx, sy) {
+        return new Float32Array([
+            sx,  0, 0,
+             0, sy, 0,
+             0,  0, 1
+        ]);
+    },
+
+    multiply: function(a, b) {
+        const r = new Float32Array(9);
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 3; j++) {
+                r[i * 3 + j] =
+                    a[0 * 3 + j] * b[i * 3 + 0] +
+                    a[1 * 3 + j] * b[i * 3 + 1] +
+                    a[2 * 3 + j] * b[i * 3 + 2];
+            }
+        }
+        return r;
+    }
+};
+</script>
+
+<!-- ==================================================
+     PONG
+     ================================================== -->
+<script>
+const canvas = document.getElementById("canvas");
+const gl = canvas.getContext("webgl2");
+
+if (!gl) {
+    throw new Error("WebGL 2 não é suportado.");
+}
+
+// --------------------------------------------------
+// VERTICES E CORES
+// --------------------------------------------------
+
+function verticesBarra(){
+    return new Float32Array([
+        -0.05,  0.2,
+        -0.05, -0.2,
+         0.05,  0.2,
+         0.05,  0.2,
+        -0.05, -0.2,
+         0.05, -0.2
+    ]);
+}
+
+function verticesBola(){
+    let vertices = [];
+    let numSegments = 30;
+    let radius = 0.05;
+
+    for (let i = 0; i < numSegments; i++) {
+        let theta1 = (i / numSegments) * 2 * Math.PI;
+        let theta2 = ((i + 1) / numSegments) * 2 * Math.PI;
+
+        vertices.push(0, 0); // Center of the circle
+        vertices.push(radius * Math.cos(theta1), radius * Math.sin(theta1));
+        vertices.push(radius * Math.cos(theta2), radius * Math.sin(theta2));
+    }
+
+    return new Float32Array(vertices);
+}
+
+let verticesBarraDireita = verticesBarra();
+
+let corBarraDireita = new Float32Array([
+    0.0, 0.0, 1.0,
+]);
+
+let verticesBarraEsquerda = verticesBarra();
+
+let corBarraEsquerda = new Float32Array([
+    0.0, 1.0, 0.0,
+]);
+
+let verticesBolaCentro = verticesBola();
+
+let corBolaCentro = new Float32Array([
+    1.0, 0.0, 0.0,
+]);
+
+// --------------------------------------------------
+// TRANSFORMAÇÕES
+// --------------------------------------------------
+
+let MbarraEsquerda = m3.translation(-0.9, 0.0);
+
+let MbarraDireita = m3.translation(0.9, 0.0);
+
+let MbolaCentro = m3.identity();
+
+// --------------------------------------------------
+// BUFFER
+// --------------------------------------------------
+
+const verticesBuffer = gl.createBuffer();
+
+// --------------------------------------------------
+// VERTEX SHADER
+// --------------------------------------------------
+
+const vertexShaderSource = `#version 300 es
+in vec2 aPosition;
+uniform mat3 u_transform;
+out vec3 vColor;
+void main() {
+    vec3 position = u_transform * vec3(aPosition, 1.0);
+    gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`;
+
+
+// --------------------------------------------------
+// FRAGMENT SHADER
+// --------------------------------------------------
+
+const fragmentShaderSource = `#version 300 es
+precision mediump float;
+uniform vec3 uColor;
+out vec4 outColor;
+void main() {
+    outColor = vec4(uColor, 1.0);
+}
+`;
+
+
+// --------------------------------------------------
+// COMPILAR SHADERS
+// --------------------------------------------------
+
+function createShader(gl, type, source) {
+
+    const shader = gl.createShader(type);
+
+    gl.shaderSource(shader, source);
+
+    gl.compileShader(shader);
+
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+
+        const error = gl.getShaderInfoLog(shader);
+
+        gl.deleteShader(shader);
+
+        throw new Error(error);
+    }
+
+    return shader;
+}
+
+
+const vertexShader = createShader(
+    gl,
+    gl.VERTEX_SHADER,
+    vertexShaderSource
+);
+
+const fragmentShader = createShader(
+    gl,
+    gl.FRAGMENT_SHADER,
+    fragmentShaderSource
+);
+
+
+// --------------------------------------------------
+// CRIAR PROGRAMA
+// --------------------------------------------------
+
+const program = gl.createProgram();
+
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+
+gl.linkProgram(program);
+
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+
+    throw new Error(
+        gl.getProgramInfoLog(program)
+    );
+}
+
+
+// --------------------------------------------------
+// LOCAL DOS ATRIBUTOS E DO UNIFORM
+// --------------------------------------------------
+
+const positionLocation =
+    gl.getAttribLocation(
+        program,
+        "aPosition"
+    );
+
+const colorLocation =
+    gl.getUniformLocation(
+        program,
+        "uColor"
+    );
+
+const transformLocation =
+    gl.getUniformLocation(
+        program,
+        "u_transform"
+    );
+
+// --------------------------------------------------
+// LIMPAR TELA
+// --------------------------------------------------
+
+gl.clearColor(0.1, 0.1, 0.1, 1.0);
+
+gl.clear(gl.COLOR_BUFFER_BIT);
+
+
+// --------------------------------------------------
+// DESENHAR
+// --------------------------------------------------
+
+const numComponents = 2;
+
+let tempoAnterior = 0;
+
+function drawScene(tempoAtual = 0){
+
+    // delta time em segundos: o quanto passou desde o quadro anterior.
+    // Assim a velocidade fica igual em 60 Hz, 120 Hz ou 144 Hz.
+    let dt = (tempoAtual - tempoAnterior) / 1000;
+
+    tempoAnterior = tempoAtual;
+
+    if (!(dt > 0)) dt = 0;      // primeiro quadro
+    if (dt > 0.05) dt = 0.05;   // aba em segundo plano: evita "pulo"
+
+    atualizaAnimacao(dt);
+
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+    drawBarraEsquerda();
+    drawBarraDireita();
+    drawBolaCentro();
+    
+    requestAnimationFrame(drawScene);
+}
+
+function drawBarraEsquerda(){
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuffer);
+
+    gl.bufferData(
+        gl.ARRAY_BUFFER,
+        verticesBarraEsquerda,
+        gl.STATIC_DRAW
+    );
+
+    gl.enableVertexAttribArray(positionLocation);
+
+    gl.vertexAttribPointer(
+        positionLocation,
+        2,
+        gl.FLOAT,
+        false,
+        0,
+        0
+    );
+
+    gl.uniform3fv(
+        colorLocation,
+        corBarraEsquerda
+    );
+
+    gl.uniformMatrix3fv(
+        transformLocation,
+        false,
+        MbarraEsquerda
+    );
+
+    gl.drawArrays(
+        gl.TRIANGLES,
+        0,
+        verticesBarraEsquerda.length / numComponents
+    );
+
+}
+
+function drawBarraDireita(){
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuffer);
+
+    gl.bufferData(
+        gl.ARRAY_BUFFER,
+        verticesBarraDireita,
+        gl.STATIC_DRAW
+    );
+
+    gl.enableVertexAttribArray(positionLocation);
+
+    gl.vertexAttribPointer(
+        positionLocation,
+        2,
+        gl.FLOAT,
+        false,
+        0,
+        0
+    );
+
+    gl.uniform3fv(
+        colorLocation,
+        corBarraDireita
+    );
+
+    gl.uniformMatrix3fv(
+        transformLocation,
+        false,
+        MbarraDireita
+    );
+
+    gl.drawArrays(
+        gl.TRIANGLES,
+        0,
+        verticesBarraDireita.length / numComponents
+    );
+
+}
+
+function drawBolaCentro(){
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuffer);
+
+    gl.bufferData(
+        gl.ARRAY_BUFFER,
+        verticesBolaCentro,
+        gl.STATIC_DRAW
+    );
+
+    gl.enableVertexAttribArray(positionLocation);
+
+    gl.vertexAttribPointer(
+        positionLocation,
+        2,
+        gl.FLOAT,
+        false,
+        0,
+        0
+    );
+
+    gl.uniform3fv(
+        colorLocation,
+        corBolaCentro
+    );
+
+    gl.uniformMatrix3fv(
+        transformLocation,
+        false,
+        MbolaCentro
+    );
+
+    gl.drawArrays(
+        gl.TRIANGLES,
+        0,
+        verticesBolaCentro.length / numComponents
+    );
+
+}
+
+
+// --------------------------------------------------
+// PARÂMETROS ANIMAÇÃO
+// --------------------------------------------------
+// Agora todas as velocidades são em UNIDADES POR SEGUNDO
+// (a tela tem 2 unidades de largura e 2 de altura).
+// Elas são multiplicadas por dt na hora de mover.
+
+let tyBE = 0.0;
+let tyBD = 0.0;
+let txBE_offset = 1.6;
+let txBD_offset = 1.6;
+let txBola = 0.0;
+let tyBola = 0.0;
+let txBola_offset = 0.0;
+let tyBola_offset = 0.0;
+
+// --------------------------------------------------
+// MEDIDAS DA CENA (usadas na colisão)
+// --------------------------------------------------
+
+const raioBola = 0.05;
+const meiaLarguraBarra = 0.05;
+const meiaAlturaBarra = 0.2;
+
+// limite de subida/descida das barras (1.0 - meia altura)
+const limiteBarra = 1.0 - meiaAlturaBarra;
+
+// posição em x onde a bola encosta na face interna de cada barra
+const faceBarraEsquerda = -0.9 + meiaLarguraBarra + raioBola;
+const faceBarraDireita  =  0.9 - meiaLarguraBarra - raioBola;
+
+// --------------------------------------------------
+// VELOCIDADE DA BOLA E PROGRESSÃO
+// --------------------------------------------------
+// A bola fica um pouco mais rápida de duas formas:
+//   1) a cada rebatida dentro do mesmo rally (ganhoPorRebatida)
+//   2) a cada ponto disputado, o saque já sai mais rápido (ganhoPorPonto)
+// Tudo limitado por velocidadeMaxima, para não virar algo injogável.
+
+const velocidadeBase = 0.80;      // unidades por segundo no 1º saque
+const ganhoPorRebatida = 1.03;    // +3% por rebatida
+const ganhoPorPonto = 0.04;       // +4% no saque por ponto já disputado
+const velocidadeMaxima = 1.60;    // teto (2x a velocidade inicial)
+
+// ângulo máximo de saída ao bater na ponta da barra (45 graus)
+const anguloMaximo = Math.PI / 4;
+
+let velocidadeBola = velocidadeBase;
+
+// --------------------------------------------------
+// PLACAR
+// --------------------------------------------------
+
+const pontosParaVencer = 5;
+
+let pontosEsquerda = 0;
+let pontosDireita = 0;
+let fimDeJogo = false;
+
+function atualizaPlacar(){
+
+    const elemento = document.getElementById("placar");
+
+    if (elemento)
+        elemento.textContent = pontosEsquerda + " x " + pontosDireita;
+    else
+        console.log("Placar: " + pontosEsquerda + " x " + pontosDireita);
+}
+
+function mostraMensagem(texto){
+
+    const elemento = document.getElementById("mensagem");
+
+    if (elemento)
+        elemento.textContent = texto;
+    else if (texto !== "")
+        console.log(texto);
+}
+
+function testaFimDeJogo(){
+
+    if (pontosEsquerda < pontosParaVencer && pontosDireita < pontosParaVencer)
+        return;
+
+    fimDeJogo = true;
+
+    let vencedor = (pontosEsquerda >= pontosParaVencer) ? "VERDE" : "AZUL";
+
+    mostraMensagem(vencedor + " venceu! Pressione R para jogar de novo.");
+}
+
+function reiniciaPartida(){
+
+    pontosEsquerda = 0;
+    pontosDireita = 0;
+    fimDeJogo = false;
+
+    tyBE = 0.0;
+    tyBD = 0.0;
+
+    atualizaPlacar();
+    mostraMensagem("");
+    reiniciaBola(Math.random() < 0.5 ? -1 : 1);
+}
+
+// --------------------------------------------------
+// CONTROLES
+// --------------------------------------------------
+// Barra esquerda (verde): W sobe, S desce
+// Barra direita (azul):   seta para cima sobe, seta para baixo desce
+// R reinicia a partida
+
+let teclas = {};
+
+window.addEventListener("keydown", function(evento){
+
+    teclas[evento.key.toLowerCase()] = true;
+
+    if (evento.key === "ArrowUp" || evento.key === "ArrowDown")
+        evento.preventDefault();
+
+    if (evento.key.toLowerCase() === "r" && fimDeJogo)
+        reiniciaPartida();
+});
+
+window.addEventListener("keyup", function(evento){
+
+    teclas[evento.key.toLowerCase()] = false;
+});
+
+// --------------------------------------------------
+// MOVIMENTO DAS BARRAS
+// --------------------------------------------------
+
+function atualizaBarras(dt){
+
+    if (teclas["w"])
+        tyBE += txBE_offset * dt;
+
+    if (teclas["s"])
+        tyBE -= txBE_offset * dt;
+
+    if (teclas["arrowup"])
+        tyBD += txBD_offset * dt;
+
+    if (teclas["arrowdown"])
+        tyBD -= txBD_offset * dt;
+
+    if (tyBE > limiteBarra)  tyBE = limiteBarra;
+    if (tyBE < -limiteBarra) tyBE = -limiteBarra;
+
+    if (tyBD > limiteBarra)  tyBD = limiteBarra;
+    if (tyBD < -limiteBarra) tyBD = -limiteBarra;
+
+    MbarraEsquerda = m3.translation(-0.9, tyBE);
+    MbarraDireita  = m3.translation(0.9, tyBD);
+}
+
+// --------------------------------------------------
+// COLISÃO DA BOLA COM AS BARRAS
+// --------------------------------------------------
+
+function bateuNaBarra(centroBarraY){
+
+    return Math.abs(tyBola - centroBarraY) <= (meiaAlturaBarra + raioBola);
+}
+
+// Rebate a bola: acelera um pouco e escolhe o ângulo de saída
+// conforme a distância entre o ponto de impacto e o centro da barra.
+// direcao = +1 manda para a direita, -1 para a esquerda.
+function rebate(centroBarraY, direcao){
+
+    velocidadeBola = Math.min(velocidadeMaxima, velocidadeBola * ganhoPorRebatida);
+
+    let d = (tyBola - centroBarraY) / (meiaAlturaBarra + raioBola);
+
+    let angulo = d * anguloMaximo;
+
+    txBola_offset = direcao * velocidadeBola * Math.cos(angulo);
+    tyBola_offset = velocidadeBola * Math.sin(angulo);
+}
+
+function testaColisaoBarras(){
+
+    if (txBola_offset < 0 && txBola <= faceBarraEsquerda && bateuNaBarra(tyBE)) {
+
+        txBola = faceBarraEsquerda;
+        rebate(tyBE, 1);
+    }
+
+    if (txBola_offset > 0 && txBola >= faceBarraDireita && bateuNaBarra(tyBD)) {
+
+        txBola = faceBarraDireita;
+        rebate(tyBD, -1);
+    }
+}
+
+// --------------------------------------------------
+// PONTO E SAQUE
+// --------------------------------------------------
+
+function reiniciaBola(direcao){
+
+    txBola = 0.0;
+    tyBola = 0.0;
+
+    // quanto mais avançada a partida, mais rápido o saque sai
+    let pontosDisputados = pontosEsquerda + pontosDireita;
+
+    velocidadeBola = Math.min(
+        velocidadeMaxima,
+        velocidadeBase * (1 + ganhoPorPonto * pontosDisputados)
+    );
+
+    // saque sempre num ângulo de 20 graus, para cima ou para baixo
+    let angulo = (Math.random() < 0.5 ? -1 : 1) * (20 * Math.PI / 180);
+
+    txBola_offset = direcao * velocidadeBola * Math.cos(angulo);
+    tyBola_offset = velocidadeBola * Math.sin(angulo);
+}
+
+function testaPonto(){
+
+    if (txBola < -1.05) {
+
+        pontosDireita++;
+        atualizaPlacar();
+        testaFimDeJogo();
+        reiniciaBola(1);
+    }
+    else if (txBola > 1.05) {
+
+        pontosEsquerda++;
+        atualizaPlacar();
+        testaFimDeJogo();
+        reiniciaBola(-1);
+    }
+}
+
+function atualizaAnimacao(dt){
+
+    if (fimDeJogo)
+        return;
+
+    atualizaBarras(dt);
+
+    txBola += txBola_offset * dt;
+
+    testaColisaoBarras();
+
+    testaPonto();
+
+    tyBola += tyBola_offset * dt;
+    if(tyBola > 1.0 || tyBola<-1.0)
+        tyBola_offset = -tyBola_offset;
+
+    MbolaCentro = m3.translation(txBola,tyBola);
+}
+
+
+// --------------------------------------------------
+// INÍCIO DO DESENHO
+// --------------------------------------------------
+
+atualizaPlacar();
+
+reiniciaBola(Math.random() < 0.5 ? -1 : 1);
+
+drawScene();
+</script>
+
+</body>
+</html>
