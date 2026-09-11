@@ -1,8 +1,6 @@
 # cg-atividades
 
-Atividades da disciplina de **Computação Gráfica**, feitas com **WebGL 2** puro
-(sem bibliotecas externas). Cada atividade é um arquivo HTML único e
-autocontido — basta abrir no navegador.
+Atividades da disciplina de **Computação Gráfica**.
 
 ## Atividades
 
