@@ -39,7 +39,7 @@ partir de primitivas (triângulos e retângulos) com cor por vértice.
 
 ### 4. Pong
 
-Jogo completo em WebGL 2, com transformações 2D aplicadas por matrizes 3×3
+Jogo com transformações 2D aplicadas por matrizes 3×3
 (`mat3`) enviadas ao vertex shader como uniform.
 
 **Controles**
@@ -66,19 +66,3 @@ Jogo completo em WebGL 2, com transformações 2D aplicadas por matrizes 3×3
 - Posicionamento de cada objeto por matriz de translação (`m3.translation`),
   recalculada a cada quadro.
 - Cor de cada objeto definida por um `uniform vec3` no fragment shader.
-
----
-
-## Como executar
-
-Clone o repositório e abra o arquivo HTML desejado no navegador:
-
-```bash
-git clone https://github.com/jjovs/cg-atividades.git
-cd cg-atividades
-xdg-open pong-webgl.html     # Linux
-# open pong-webgl.html       # macOS
-# start pong-webgl.html      # Windows
-```
-
-Requer um navegador com suporte a WebGL 2 (Chrome, Firefox ou Edge atuais).
