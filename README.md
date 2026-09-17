@@ -6,10 +6,11 @@ Atividades da disciplina de **Computação Gráfica**.
 
 | # | Atividade | Arquivo | Abrir online |
 |---|---|---|---|
-| 1 | Retas com Bresenham | [`exercicio1-bresenham-reta.html`](exercicio1-bresenham-reta.html) | [abrir](https://jjovs.github.io/cg-atividades/exercicio1-bresenham-reta.html) |
-| 2 | Retas e triângulos com Bresenham | [`exercicio2-bresenham-triangulo.html`](exercicio2-bresenham-triangulo.html) | [abrir](https://jjovs.github.io/cg-atividades/exercicio2-bresenham-triangulo.html) |
-| 3 | Flor, robô e carro | [`flor-robo-carro.html`](flor-robo-carro.html) | [abrir](https://jjovs.github.io/cg-atividades/flor-robo-carro.html) |
+| 1 | Flor, robô e carro | [`flor-robo-carro.html`](flor-robo-carro.html) | [abrir](https://jjovs.github.io/cg-atividades/flor-robo-carro.html) |
+| 2 | Retas com Bresenham | [`exercicio1-bresenham-reta.html`](exercicio1-bresenham-reta.html) | [abrir](https://jjovs.github.io/cg-atividades/exercicio1-bresenham-reta.html) |
+| 3 | Retas e triângulos com Bresenham | [`exercicio2-bresenham-triangulo.html`](exercicio2-bresenham-triangulo.html) | [abrir](https://jjovs.github.io/cg-atividades/exercicio2-bresenham-triangulo.html) |
 | 4 | Pong | [`pong-webgl.html`](pong-webgl.html) | [abrir](https://jjovs.github.io/cg-atividades/pong-webgl.html) |
+| 5 | Robô animado | [`robo-animado.html`](robo-animado.html) | [abrir](https://jjovs.github.io/cg-atividades/robo-animado.html) |
 
 ---
 
