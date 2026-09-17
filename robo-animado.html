@@ -838,30 +838,6 @@ function buildScenery() {
         new SceneObject(dashes, [0.26, 0.29, 0.38])
     );
 
-    // prédios ao fundo
-    const buildings = [];
-
-    const sizes = [
-        [-1.80, 0.34, 0.26],
-        [-1.30, 0.22, 0.16],
-        [-0.85, 0.30, 0.34],
-        [-0.30, 0.20, 0.22],
-        [ 0.20, 0.28, 0.30],
-        [ 0.70, 0.24, 0.18],
-        [ 1.15, 0.32, 0.28],
-        [ 1.62, 0.26, 0.22]
-    ];
-
-    for (const [x, width, height] of sizes) {
-        buildings.push(
-            ...rectangleVertices(x, -0.58, width, height)
-        );
-    }
-
-    scenery.push(
-        new SceneObject(buildings, [0.13, 0.15, 0.22])
-    );
-
     return scenery;
 }
 
