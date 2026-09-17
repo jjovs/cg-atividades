@@ -70,26 +70,19 @@ Jogo com transformações 2D aplicadas por matrizes 3×3
 
 ### 5. Robô animado
 
-Robô montado por partes (cabeça, corpo, braços e pernas), animado com
-transformações 2D hierárquicas: cada parte tem seu próprio pivô e ângulo, e a
-matriz do corpo é propagada para os membros.
+Robô montado por partes (cabeça, corpo, braços e pernas) com transformações 2D
+hierárquicas: cada parte tem seu próprio pivô e ângulo, e a matriz do corpo é
+propagada para os membros.
 
 **Movimentos**
 
-- **Robô**: caminha de um lado ao outro da cena, inverte o sentido ao chegar na
-  borda (espelhamento com `m3.scaling(-1, 1)`) e sobe/desce um pouco a cada passo.
+- **Robô**: caminha pela cena e inverte o sentido ao chegar na borda.
 - **Pernas**: giram no quadril em oposição uma à outra, no ritmo do passo.
-- **Braços**: giram no ombro em outra frequência e outra amplitude, abrindo
-  sempre para fora do corpo.
+- **Braços**: giram no ombro em outra frequência e outra amplitude.
 - **Cabeça**: gira devagar no pescoço, de um lado ao outro.
 
 **Detalhes de implementação**
 
-- Hierarquia de matrizes: `modelo da parte = matriz do robô · translação até o
-  pivô · rotação da parte`.
-- Janela de recorte `[-2, 2] x [-1, 1]` mapeada para coordenadas normalizadas
-  por `m3.setClippingWindow`.
-- Cada parte é um conjunto de peças (retângulos e círculos) descritas em
-  coordenadas locais, a partir do pivô.
-- Animação por **delta time**, com a mesma velocidade em qualquer taxa de
-  quadros.
+- Modelo de cada parte: `matriz do robô · translação até o pivô · rotação`.
+- Janela de recorte `[-2, 2] x [-1, 1]` mapeada por `m3.setClippingWindow`.
+- Animação por **delta time**, igual em qualquer taxa de quadros.
