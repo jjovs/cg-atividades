@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Robô Animado</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    background: #1e1e2e;
+    color: #eee;
+    padding: 20px;
+    margin: 0;
+  }
+  h1 { font-size: 1.2rem; margin: 0 0 6px; }
+  p  { font-size: .9rem; margin: 0 0 14px; color: #bbb; }
+  canvas { background: #000; border-radius: 10px; max-width: 100%; }
+</style>
+</head>
+<body>
+
+<h1>Robô Animado</h1>
+<p>
+  Cabeça, corpo, braços e pernas montados em hierarquia de matrizes 3&times;3.
+  O robô caminha de um lado ao outro, os braços balançam em um ritmo,
+  as pernas em outro e a cabeça gira lentamente.
+</p>
+
+<canvas id="canvas" width="900" height="450"></canvas>
+
+<!-- ==================================================
+     BIBLIOTECA m3 (matrizes 3x3 em column-major)
+     ================================================== -->
+<script>
+const m3 = {
+
+    identity: function() {
+        return new Float32Array([
+            1, 0, 0,
+            0, 1, 0,
+            0, 0, 1
+        ]);
+    },
+
+    translation: function(tx, ty) {
+        return new Float32Array([
+             1,  0, 0,
+             0,  1, 0,
+            tx, ty, 1
+        ]);
+    },
+
+    rotation: function(anguloEmRadianos) {
+        const c = Math.cos(anguloEmRadianos);
+        const s = Math.sin(anguloEmRadianos);
+        return new Float32Array([
+             c, s, 0,
+            -s, c, 0,
+             0, 0, 1
+        ]);
+    },
+
+    scaling: function(sx, sy) {
+        return new Float32Array([
+            sx,  0, 0,
+             0, sy, 0,
+             0,  0, 1
+        ]);
+    },
+
+    multiply: function(a, b) {
+        const r = new Float32Array(9);
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 3; j++) {
+                r[i * 3 + j] =
+                    a[0 * 3 + j] * b[i * 3 + 0] +
+                    a[1 * 3 + j] * b[i * 3 + 1] +
+                    a[2 * 3 + j] * b[i * 3 + 2];
+            }
+        }
+        return r;
+    },
+
+    // Mapeia a janela de recorte [xMin,xMax] x [yMin,yMax]
+    // para o quadrado normalizado [-1,1] x [-1,1].
+    setClippingWindow: function(xMin, yMin, xMax, yMax) {
+
+        const sx = 2.0 / (xMax - xMin);
+        const sy = 2.0 / (yMax - yMin);
+
+        const tx = -(xMax + xMin) / (xMax - xMin);
+        const ty = -(yMax + yMin) / (yMax - yMin);
+
+        return new Float32Array([
+            sx,  0, 0,
+             0, sy, 0,
+            tx, ty, 1
+        ]);
+    }
+};
+</script>
+
+<!-- ==================================================
+     ROBÔ
+     ================================================== -->
+<script>
+const canvas = document.getElementById("canvas");
+const gl = canvas.getContext("webgl2");
+
+if (!gl) {
+    throw new Error("WebGL 2 não é suportado.");
+}
+
+const vertexShaderSource = `#version 300 es
+
+in vec2 aPosition;
+
+uniform mat3 u_viewTransform;
+uniform mat3 u_modelTransform;
+
+void main() {
+
+    vec3 position =
+        u_viewTransform *
+        u_modelTransform *
+        vec3(aPosition, 1.0);
+
+    gl_Position =
+        vec4(position.xy, 0.0, 1.0);
+}
+`;
+
+const fragmentShaderSource = `#version 300 es
+
+precision mediump float;
+
+uniform vec3 uColor;
+
+out vec4 outColor;
+
+void main() {
+
+    outColor =
+        vec4(uColor, 1.0);
+}
+`;
+
+function createShader(gl, type, source) {
+
+    const shader =
+        gl.createShader(type);
+
+    gl.shaderSource(
+        shader,
+        source
+    );
+
+    gl.compileShader(shader);
+
+    if (
+        !gl.getShaderParameter(
+            shader,
+            gl.COMPILE_STATUS
+        )
+    ) {
+
+        const error =
+            gl.getShaderInfoLog(shader);
+
+        gl.deleteShader(shader);
+
+        throw new Error(error);
+    }
+
+    return shader;
+}
+
+function createProgram(
+    gl,
+    vertexShaderSource,
+    fragmentShaderSource
+) {
+
+    const vertexShader =
+        createShader(
+            gl,
+            gl.VERTEX_SHADER,
+            vertexShaderSource
+        );
+
+    const fragmentShader =
+        createShader(
+            gl,
+            gl.FRAGMENT_SHADER,
+            fragmentShaderSource
+        );
+
+    const program =
+        gl.createProgram();
+
+    gl.attachShader(
+        program,
+        vertexShader
+    );
+
+    gl.attachShader(
+        program,
+        fragmentShader
+    );
+
+    gl.linkProgram(program);
+
+    if (
+        !gl.getProgramParameter(
+            program,
+            gl.LINK_STATUS
+        )
+    ) {
+
+        throw new Error(
+            gl.getProgramInfoLog(program)
+        );
+    }
+
+    return program;
+}
+
+
+const program =
+    createProgram(
+        gl,
+        vertexShaderSource,
+        fragmentShaderSource
+    );
+
+
+// ==================================================
+// CLASSE RENDERER
+// ==================================================
+
+class Renderer {
+
+    constructor(gl, program) {
+        this.gl = gl;
+        this.program = program;
+
+        this.positionLocation =
+            gl.getAttribLocation(
+                program,
+                "aPosition"
+            );
+
+        this.colorLocation =
+            gl.getUniformLocation(
+                program,
+                "uColor"
+            );
+
+        this.viewTransformLocation =
+            gl.getUniformLocation(
+                program,
+                "u_viewTransform"
+            );
+
+        this.modelTransformLocation =
+            gl.getUniformLocation(
+                program,
+                "u_modelTransform"
+            );
+
+        this.viewTransform =
+            m3.identity();
+
+        this.verticesBuffer =
+            gl.createBuffer();
+    }
+
+    defineViewTransform(viewTransform) {
+        this.viewTransform =
+            viewTransform;
+    }
+
+    draw(object) {
+        const gl = this.gl;
+
+        gl.bindBuffer(
+            gl.ARRAY_BUFFER,
+            this.verticesBuffer
+        );
+
+        gl.bufferData(
+            gl.ARRAY_BUFFER,
+            object.vertices,
+            gl.STATIC_DRAW
+        );
+
+        gl.enableVertexAttribArray(
+            this.positionLocation
+        );
+
+        gl.vertexAttribPointer(
+            this.positionLocation,
+            2,
+            gl.FLOAT,
+            false,
+            0,
+            0
+        );
+
+        gl.uniform3fv(
+            this.colorLocation,
+            object.color
+        );
+
+        gl.uniformMatrix3fv(
+            this.modelTransformLocation,
+            false,
+            object.modelTransform
+        );
+
+        gl.uniformMatrix3fv(
+            this.viewTransformLocation,
+            false,
+            this.viewTransform
+        );
+
+        gl.drawArrays(
+            gl.TRIANGLES,
+            0,
+            object.vertices.length / 2
+        );
+    }
+}
+
+
+// ==================================================
+// AUXILIARY FUNCTIONS
+// ==================================================
+
+function rectangleVertices(x, y, width, height) {
+    return [
+        x, y,
+        x + width, y + height,
+        x, y + height,
+
+        x, y,
+        x + width, y,
+        x + width, y + height
+    ];
+}
+
+function circleVertices(cx, cy, radius, numSegments) {
+    const vertices = [];
+
+    for (let i = 0; i < numSegments; i++) {
+        const theta1 =
+            (i / numSegments) *
+            2 * Math.PI;
+
+        const theta2 =
+            ((i + 1) / numSegments) *
+            2 * Math.PI;
+
+
+        vertices.push(
+            cx,
+            cy
+        );
+
+        vertices.push(
+            cx + radius * Math.cos(theta1),
+            cy + radius * Math.sin(theta1)
+        );
+
+
+        vertices.push(
+            cx + radius * Math.cos(theta2),
+            cy + radius * Math.sin(theta2)
+        );
+    }
+
+    return vertices;
+}
+
+
+// ==================================================
+// CLASSE SCENE OBJECT
+// ==================================================
+
+class SceneObject {
+
+    constructor(vertices, color) {
+
+        this.vertices =
+            new Float32Array(vertices);
+
+        this.color =
+            new Float32Array(color);
+
+        this.modelTransform = m3.identity();
+    }
+
+    updateModelTransform(modelTransform) {
+
+        this.modelTransform = modelTransform;
+    }
+
+    draw(renderer) {
+
+        renderer.draw(this);
+    }
+}
+
+
+// ==================================================
+// CLASSE ROBOT PART
+//
+// Cada parte tem um pivô (a "articulação") e um
+// ângulo próprio. As peças são desenhadas em
+// coordenadas locais, medidas a partir do pivô,
+// então girar a parte gira todas as suas peças.
+// ==================================================
+
+class RobotPart {
+
+    constructor(pivotX, pivotY) {
+
+        this.pivotX = pivotX;
+
+        this.pivotY = pivotY;
+
+        this.theta = 0.0;
+
+        this.pieces = [];
+    }
+
+    addPiece(vertices, color) {
+
+        this.pieces.push(
+            new SceneObject(vertices, color)
+        );
+
+        return this;
+    }
+
+    updateRotation(theta) {
+
+        this.theta = theta;
+    }
+
+    updateModelTransform(parentTransform) {
+
+        const localTransform =
+
+            m3.multiply(
+                m3.translation(this.pivotX, this.pivotY),
+                m3.rotation(this.theta)
+            );
+
+        const partTransform =
+
+            m3.multiply(
+                parentTransform,
+                localTransform
+            );
+
+        for (const piece of this.pieces) {
+            piece.updateModelTransform(partTransform);
+        }
+    }
+
+    draw(renderer) {
+
+        for (const piece of this.pieces) {
+            renderer.draw(piece);
+        }
+    }
+}
+
+
+// ==================================================
+// CORES DO ROBÔ
+// ==================================================
+
+const COLOR_BODY       = [0.30, 0.40, 0.56];
+const COLOR_BODY_LIGHT = [0.56, 0.66, 0.82];
+const COLOR_LIMB       = [0.47, 0.57, 0.73];
+const COLOR_JOINT      = [0.26, 0.32, 0.45];
+const COLOR_HEAD       = [0.62, 0.70, 0.84];
+const COLOR_VISOR      = [0.10, 0.14, 0.22];
+const COLOR_EYE        = [0.25, 0.90, 1.00];
+const COLOR_LAMP       = [1.00, 0.76, 0.22];
+const COLOR_ANTENNA    = [0.95, 0.35, 0.35];
+const COLOR_HAND       = [0.92, 0.80, 0.35];
+const COLOR_FOOT       = [0.20, 0.24, 0.34];
+
+
+// ==================================================
+// PARTES DO ROBÔ
+//
+// A origem do robô fica na altura do quadril.
+// ==================================================
+
+function buildTorso() {
+
+    const torso = new RobotPart(0.0, 0.0);
+
+    // tronco
+    torso.addPiece(
+        rectangleVertices(-0.16, 0.02, 0.32, 0.38),
+        COLOR_BODY
+    );
+
+    // peitoral
+    torso.addPiece(
+        rectangleVertices(-0.10, 0.12, 0.20, 0.16),
+        COLOR_BODY_LIGHT
+    );
+
+    // luz do peito
+    torso.addPiece(
+        circleVertices(0.0, 0.20, 0.035, 16),
+        COLOR_LAMP
+    );
+
+    // quadril
+    torso.addPiece(
+        rectangleVertices(-0.13, -0.05, 0.26, 0.09),
+        COLOR_JOINT
+    );
+
+    // pescoço
+    torso.addPiece(
+        rectangleVertices(-0.05, 0.38, 0.10, 0.07),
+        COLOR_JOINT
+    );
+
+    return torso;
+}
+
+function buildHead() {
+
+    // pivô no pescoço
+    const head = new RobotPart(0.0, 0.44);
+
+    // caixa da cabeça
+    head.addPiece(
+        rectangleVertices(-0.14, 0.00, 0.28, 0.26),
+        COLOR_HEAD
+    );
+
+    // visor
+    head.addPiece(
+        rectangleVertices(-0.10, 0.09, 0.20, 0.10),
+        COLOR_VISOR
+    );
+
+    // olhos
+    head.addPiece(
+        circleVertices(-0.05, 0.14, 0.028, 14),
+        COLOR_EYE
+    );
+
+    head.addPiece(
+        circleVertices(0.05, 0.14, 0.028, 14),
+        COLOR_EYE
+    );
+
+    // boca
+    head.addPiece(
+        rectangleVertices(-0.07, 0.03, 0.14, 0.03),
+        COLOR_VISOR
+    );
+
+    // haste da antena
+    head.addPiece(
+        rectangleVertices(-0.012, 0.26, 0.024, 0.10),
+        COLOR_JOINT
+    );
+
+    // bolinha da antena
+    head.addPiece(
+        circleVertices(0.0, 0.38, 0.035, 14),
+        COLOR_ANTENNA
+    );
+
+    return head;
+}
+
+function buildArm(shoulderX) {
+
+    // pivô no ombro
+    const arm = new RobotPart(shoulderX, 0.33);
+
+    // ombro
+    arm.addPiece(
+        circleVertices(0.0, 0.0, 0.048, 16),
+        COLOR_JOINT
+    );
+
+    // braço (pende para baixo a partir do pivô)
+    arm.addPiece(
+        rectangleVertices(-0.035, -0.30, 0.07, 0.30),
+        COLOR_LIMB
+    );
+
+    // mão
+    arm.addPiece(
+        circleVertices(0.0, -0.31, 0.045, 16),
+        COLOR_HAND
+    );
+
+    return arm;
+}
+
+function buildLeg(hipX) {
+
+    // pivô no quadril
+    const leg = new RobotPart(hipX, -0.02);
+
+    // articulação
+    leg.addPiece(
+        circleVertices(0.0, 0.0, 0.042, 16),
+        COLOR_JOINT
+    );
+
+    // perna
+    leg.addPiece(
+        rectangleVertices(-0.05, -0.38, 0.10, 0.38),
+        COLOR_LIMB
+    );
+
+    // pé
+    leg.addPiece(
+        rectangleVertices(-0.09, -0.46, 0.18, 0.08),
+        COLOR_FOOT
+    );
+
+    return leg;
+}
+
+
+// ==================================================
+// CLASSE ROBOT
+//
+// Movimentos independentes:
+//   - o robô caminha e sobe/desce (translação)
+//   - as pernas giram no ritmo do passo
+//   - os braços giram em outra frequência e
+//     com outra amplitude
+//   - a cabeça gira devagar, de um lado ao outro
+// ==================================================
+
+class Robot {
+
+    constructor(tx, ty) {
+
+        this.tx = tx;
+
+        this.ty = ty;
+
+        // deslocamento horizontal, em unidades por segundo
+        this.speed = 0.45;
+
+        this.direction = 1.0;
+
+        this.limitX = 1.55;
+
+        // fases independentes de cada movimento
+        this.legPhase = 0.0;
+
+        this.armPhase = 0.0;
+
+        this.headPhase = 0.0;
+
+        // frequências (radianos por segundo)
+        this.legFrequency = 4.4;
+
+        this.armFrequency = 2.7;
+
+        this.headFrequency = 1.2;
+
+        // amplitudes (radianos)
+        this.legAmplitude = 0.42;
+
+        this.armAmplitude = 1.05;
+
+        this.headAmplitude = 0.30;
+
+        // altura do "pulinho" do passo
+        this.bobAmplitude = 0.022;
+
+        this.torso = buildTorso();
+
+        this.head = buildHead();
+
+        this.leftArm = buildArm(-0.205);
+
+        this.rightArm = buildArm(0.205);
+
+        this.leftLeg = buildLeg(-0.085);
+
+        this.rightLeg = buildLeg(0.085);
+    }
+
+    update(deltaTime) {
+
+        // --- caminhada ---
+
+        this.tx +=
+            this.speed * this.direction * deltaTime;
+
+        if (this.tx > this.limitX) {
+
+            this.tx = this.limitX;
+
+            this.direction = -this.direction;
+        }
+        else if (this.tx < -this.limitX) {
+
+            this.tx = -this.limitX;
+
+            this.direction = -this.direction;
+        }
+
+        // --- fases ---
+
+        this.legPhase +=
+            this.legFrequency * deltaTime;
+
+        this.armPhase +=
+            this.armFrequency * deltaTime;
+
+        this.headPhase +=
+            this.headFrequency * deltaTime;
+
+        // --- ângulos de cada parte ---
+
+        const legAngle =
+            this.legAmplitude * Math.sin(this.legPhase);
+
+        // o braço vai de 0 (esticado para baixo) até a amplitude
+        // máxima, sempre abrindo para fora do corpo
+        const armAngle =
+            this.armAmplitude *
+            (0.5 + 0.5 * Math.sin(this.armPhase));
+
+        const headAngle =
+            this.headAmplitude * Math.sin(this.headPhase);
+
+        this.leftLeg.updateRotation(legAngle);
+
+        this.rightLeg.updateRotation(-legAngle);
+
+        // os dois braços abrem juntos, em ritmo próprio
+        this.leftArm.updateRotation(-armAngle);
+
+        this.rightArm.updateRotation(armAngle);
+
+        this.head.updateRotation(headAngle);
+
+        // leve balanço do tronco, na frequência do passo
+        this.torso.updateRotation(
+            0.05 * Math.sin(this.legPhase)
+        );
+
+        // --- transformação do robô inteiro ---
+
+        const bob =
+            this.bobAmplitude *
+            Math.abs(Math.sin(this.legPhase));
+
+        const robotTransform =
+
+            m3.multiply(
+                m3.translation(this.tx, this.ty + bob),
+                m3.scaling(this.direction, 1.0)
+            );
+
+        this.leftLeg.updateModelTransform(robotTransform);
+
+        this.rightLeg.updateModelTransform(robotTransform);
+
+        this.torso.updateModelTransform(robotTransform);
+
+        this.head.updateModelTransform(robotTransform);
+
+        this.leftArm.updateModelTransform(robotTransform);
+
+        this.rightArm.updateModelTransform(robotTransform);
+    }
+
+    draw(renderer) {
+
+        // pernas atrás, braços na frente do tronco
+        this.leftLeg.draw(renderer);
+
+        this.rightLeg.draw(renderer);
+
+        this.torso.draw(renderer);
+
+        this.head.draw(renderer);
+
+        this.leftArm.draw(renderer);
+
+        this.rightArm.draw(renderer);
+    }
+}
+
+
+// ==================================================
+// CENÁRIO
+// ==================================================
+
+function buildScenery() {
+
+    const scenery = [];
+
+    // chão
+    scenery.push(
+        new SceneObject(
+            rectangleVertices(-2.0, -1.0, 4.0, 0.42),
+            [0.16, 0.18, 0.24]
+        )
+    );
+
+    // faixa do chão
+    scenery.push(
+        new SceneObject(
+            rectangleVertices(-2.0, -0.60, 4.0, 0.02),
+            [0.30, 0.34, 0.44]
+        )
+    );
+
+    // tracejado do piso
+    const dashes = [];
+
+    for (let x = -1.95; x < 2.0; x += 0.30) {
+        dashes.push(
+            ...rectangleVertices(x, -0.74, 0.16, 0.02)
+        );
+    }
+
+    scenery.push(
+        new SceneObject(dashes, [0.26, 0.29, 0.38])
+    );
+
+    // prédios ao fundo
+    const buildings = [];
+
+    const sizes = [
+        [-1.80, 0.34, 0.26],
+        [-1.30, 0.22, 0.16],
+        [-0.85, 0.30, 0.34],
+        [-0.30, 0.20, 0.22],
+        [ 0.20, 0.28, 0.30],
+        [ 0.70, 0.24, 0.18],
+        [ 1.15, 0.32, 0.28],
+        [ 1.62, 0.26, 0.22]
+    ];
+
+    for (const [x, width, height] of sizes) {
+        buildings.push(
+            ...rectangleVertices(x, -0.58, width, height)
+        );
+    }
+
+    scenery.push(
+        new SceneObject(buildings, [0.13, 0.15, 0.22])
+    );
+
+    return scenery;
+}
+
+
+// ==================================================
+// CLASSE SCENE
+// ==================================================
+
+class Scene {
+
+    constructor(gl, program) {
+
+        this.renderer = new Renderer(gl, program);
+
+        this.viewTransform =
+            m3.setClippingWindow(-2.0, -1.0, 2.0, 1.0);
+
+        this.renderer.defineViewTransform(this.viewTransform);
+
+        this.scenery = buildScenery();
+
+        this.robot = new Robot(-1.2, -0.115);
+
+        this.previousTime = 0.0;
+    }
+
+    update(deltaTime) {
+
+        this.robot.update(deltaTime);
+    }
+
+    draw() {
+
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        gl.useProgram(program);
+
+        for (const object of this.scenery) {
+            this.renderer.draw(object);
+        }
+
+        this.robot.draw(this.renderer);
+    }
+
+    execute(currentTime) {
+
+        // delta time em segundos, para a animação ficar
+        // igual em 60 Hz, 120 Hz ou 144 Hz
+        let deltaTime =
+            (currentTime - this.previousTime) / 1000.0;
+
+        this.previousTime = currentTime;
+
+        if (deltaTime > 0.05) {
+            deltaTime = 0.05;
+        }
+
+        this.update(deltaTime);
+
+        this.draw();
+
+        requestAnimationFrame(
+            (time) => this.execute(time)
+        );
+    }
+
+    init() {
+
+        requestAnimationFrame((time) => {
+
+            this.previousTime = time;
+
+            requestAnimationFrame(
+                (next) => this.execute(next)
+            );
+        });
+    }
+}
+
+
+// ==================================================
+// CONFIGURAÇÃO INICIAL DO WEBGL
+// ==================================================
+
+gl.clearColor(
+    0.07,
+    0.08,
+    0.12,
+    1.0
+);
+
+gl.viewport(
+    0,
+    0,
+    canvas.width,
+    canvas.height
+);
+
+
+// ==================================================
+// CRIAR CENA
+// ==================================================
+
+const scene =
+    new Scene(gl, program);
+
+
+// ==================================================
+// INICIAR ANIMAÇÃO
+// ==================================================
+
+scene.init();
+</script>
+</body>
+</html>
