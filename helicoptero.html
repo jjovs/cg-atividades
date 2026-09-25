@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Helicóptero</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    background: #1e1e2e;
+    color: #eee;
+    padding: 20px;
+    margin: 0;
+  }
+  h1 { font-size: 1.2rem; margin: 0 0 6px; }
+  p  { margin: 0 0 14px; color: #bbb; font-size: 0.9rem; }
+  kbd {
+    background: #333;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: inherit;
+  }
+  canvas { background: #000; border-radius: 10px; max-width: 100%; }
+  #info { margin-top: 10px; font-size: 0.85rem; color: #aaa; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<h1>Helicóptero</h1>
+<p>Use <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> para movimentar o helicóptero.</p>
+
+<canvas id="canvas" width="600" height="600"></canvas>
+<div id="info"></div>
+
+<!-- ==================================================
+     BIBLIOTECA m4 (matrizes 4x4 em column-major)
+     ================================================== -->
+<script>
+var m4 = {
+  identity: function() {
+    return [
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1
+    ];
+  },
+
+  transpose: function(m) {
+    return [
+      m[0], m[4], m[8],  m[12],
+      m[1], m[5], m[9],  m[13],
+      m[2], m[6], m[10], m[14],
+      m[3], m[7], m[11], m[15],
+    ];
+  },
+
+  multiply: function(a, b) {
+    var a00 = a[0 * 4 + 0];
+    var a01 = a[1 * 4 + 0];
+    var a02 = a[2 * 4 + 0];
+    var a03 = a[3 * 4 + 0];
+    var a10 = a[0 * 4 + 1];
+    var a11 = a[1 * 4 + 1];
+    var a12 = a[2 * 4 + 1];
+    var a13 = a[3 * 4 + 1];
+    var a20 = a[0 * 4 + 2];
+    var a21 = a[1 * 4 + 2];
+    var a22 = a[2 * 4 + 2];
+    var a23 = a[3 * 4 + 2];
+    var a30 = a[0 * 4 + 3];
+    var a31 = a[1 * 4 + 3];
+    var a32 = a[2 * 4 + 3];
+    var a33 = a[3 * 4 + 3];
+    var b00 = b[0 * 4 + 0];
+    var b01 = b[1 * 4 + 0];
+    var b02 = b[2 * 4 + 0];
+    var b03 = b[3 * 4 + 0];
+    var b10 = b[0 * 4 + 1];
+    var b11 = b[1 * 4 + 1];
+    var b12 = b[2 * 4 + 1];
+    var b13 = b[3 * 4 + 1];
+    var b20 = b[0 * 4 + 2];
+    var b21 = b[1 * 4 + 2];
+    var b22 = b[2 * 4 + 2];
+    var b23 = b[3 * 4 + 2];
+    var b30 = b[0 * 4 + 3];
+    var b31 = b[1 * 4 + 3];
+    var b32 = b[2 * 4 + 3];
+    var b33 = b[3 * 4 + 3];
+    return [
+      a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30,
+      a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30,
+      a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30,
+      a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30,
+      a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31,
+      a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31,
+      a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31,
+      a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31,
+      a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32,
+      a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32,
+      a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32,
+      a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32,
+      a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33,
+      a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33,
+      a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33,
+      a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33,
+    ];
+  },
+
+  translation: function(tx, ty, tz) {
+    return [
+        1,  0,  0,  0,
+        0,  1,  0,  0,
+        0,  0,  1,  0,
+        tx, ty, tz, 1,
+    ];
+  },
+
+  xRotation: function(angleInRadians) {
+    var c = Math.cos(angleInRadians);
+    var s = Math.sin(angleInRadians);
+
+    return [
+      1,  0, 0, 0,
+      0,  c, s, 0,
+      0, -s, c, 0,
+      0,  0, 0, 1,
+    ];
+  },
+
+  yRotation: function(angleInRadians) {
+    var c = Math.cos(angleInRadians);
+    var s = Math.sin(angleInRadians);
+
+    return [
+      c, 0, -s, 0,
+      0, 1,  0, 0,
+      s, 0,  c, 0,
+      0, 0,  0, 1,
+    ];
+  },
+
+  zRotation: function(angleInRadians) {
+    var c = Math.cos(angleInRadians);
+    var s = Math.sin(angleInRadians);
+
+    return [
+        c, s, 0, 0,
+       -s, c, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    ];
+  },
+
+  scaling: function(sx, sy, sz) {
+    return [
+      sx, 0,  0,  0,
+      0, sy,  0,  0,
+      0,  0, sz,  0,
+      0,  0,  0,  1,
+    ];
+  },
+
+  translate: function(m, tx, ty, tz) {
+    return m4.multiply(m4.translation(tx, ty, tz),m);
+  },
+
+  xRotate: function(m, angleInRadians) {
+    return m4.multiply(m4.xRotation(angleInRadians),m);
+  },
+
+  yRotate: function(m, angleInRadians) {
+    return m4.multiply(m4.yRotation(angleInRadians),m);
+  },
+
+  zRotate: function(m, angleInRadians) {
+    return m4.multiply(m4.zRotation(angleInRadians),m);
+  },
+
+  scale: function(m, sx, sy, sz) {
+    return m4.multiply(m4.scaling(sx, sy, sz),m);
+  },
+
+};
+</script>
+
+<!-- ==================================================
+     GEOMETRIA DO HELICÓPTERO
+     ================================================== -->
+<script>
+// ==================================================
+// HELICOPTER BODY VERTICES
+// ==================================================
+
+function helicopterBodyVertices(){
+
+    return new Float32Array([
+        // Front
+        -0.2, -0.2,  0.2,
+         0.2, -0.2,  0.2,
+         0.2,  0.2,  0.2,
+        -0.2,  0.2,  0.2,
+
+        // Back
+        -0.2, -0.2, -0.2,
+         0.2, -0.2, -0.2,
+         0.2,  0.2, -0.2,
+        -0.2,  0.2, -0.2
+    ]);
+}
+
+// ==================================================
+// HELICOPTER BODY COLORS
+// ==================================================
+
+function helicopterBodyColors(){
+    return new Float32Array([
+        // Front
+        0.2, 0.7, 0.9,
+        0.2, 0.7, 0.9,
+        0.2, 0.7, 0.9,
+        0.2, 0.7, 0.9,
+
+        // Back
+        0.1, 0.5, 0.7,
+        0.1, 0.5, 0.7,
+        0.1, 0.5, 0.7,
+        0.1, 0.5, 0.7
+    ]);
+}
+
+// ==================================================
+// HELICOPTER BODY INDICES
+// ==================================================
+
+function helicopterBodyIndices(){
+    return new Uint16Array([
+        // Front
+        0, 1, 2,
+        0, 2, 3,
+
+        // Back
+        4, 6, 5,
+        4, 7, 6,
+
+        // Left
+        0, 3, 7,
+        0, 7, 4,
+
+        // Right
+        1, 5, 6,
+        1, 6, 2,
+
+        // Top
+        3, 2, 6,
+        3, 6, 7,
+
+        // Bottom
+        0, 4, 5,
+        0, 5, 1
+    ])
+}
+
+// ==================================================
+// HELICOPTER TOP SHAFT VERTICES
+// ==================================================
+
+function helicopterTopShaftVertices(){
+
+    return new Float32Array([
+
+        // ==========================================
+        // Haste vertical
+        // x: -0.03 até 0.03
+        // y:  0.20 até 0.30
+        // z: -0.03 até 0.03
+        // ==========================================
+
+        // Face inferior
+        -0.03, 0.20, -0.03,
+         0.03, 0.20, -0.03,
+         0.03, 0.20,  0.03,
+        -0.03, 0.20,  0.03,
+
+        // Face superior
+        -0.03, 0.30, -0.03,
+         0.03, 0.30, -0.03,
+         0.03, 0.30,  0.03,
+        -0.03, 0.30,  0.03
+    ]);
+}
+
+// ==================================================
+// HELICOPTER TOP SHAFT COLORS
+// ==================================================
+
+function helicopterTopShaftColors(){
+
+    return new Float32Array([
+
+        // Face inferior
+        0.3, 0.3, 0.3,
+        0.3, 0.3, 0.3,
+        0.3, 0.3, 0.3,
+        0.3, 0.3, 0.3,
+
+        // Face superior
+        0.4, 0.4, 0.4,
+        0.4, 0.4, 0.4,
+        0.4, 0.4, 0.4,
+        0.4, 0.4, 0.4
+    ]);
+}
+
+// ==================================================
+// HELICOPTER TOP SHAFT INDICES
+// ==================================================
+
+function helicopterTopShaftIndices(){
+
+    return new Uint16Array([
+
+        // Bottom
+        0, 1, 2,
+        0, 2, 3,
+
+        // Top
+        4, 6, 5,
+        4, 7, 6,
+
+        // Front
+        0, 4, 5,
+        0, 5, 1,
+
+        // Back
+        3, 2, 6,
+        3, 6, 7,
+
+        // Left
+        0, 3, 7,
+        0, 7, 4,
+
+        // Right
+        1, 5, 6,
+        1, 6, 2
+    ]);
+}
+
+
+// ==================================================
+// HELICOPTER TAIL VERTICES
+// ==================================================
+
+function helicopterTailVertices(){
+
+    return new Float32Array([
+         0.0, -0.05,  0.05,
+         0.7, -0.05,  0.05,
+         0.7,  0.05,  0.05,
+         0.0,  0.05,  0.05,
+
+         0.0, -0.05, -0.05,
+         0.7, -0.05, -0.05,
+         0.7,  0.05, -0.05,
+         0.0,  0.05, -0.05
+    ]);
+}
+
+// ==================================================
+// HELICOPTER TAIL COLORS
+// ==================================================
+
+function helicopterTailColors(){
+    return new Float32Array([
+        0.8, 0.2, 0.2,
+        0.8, 0.2, 0.2,
+        0.8, 0.2, 0.2,
+        0.8, 0.2, 0.2,
+
+        0.6, 0.1, 0.1,
+        0.6, 0.1, 0.1,
+        0.6, 0.1, 0.1,
+        0.6, 0.1, 0.1
+    ]);
+}
+
+// ==================================================
+// HELICOPTER TAIL INDICES
+// ==================================================
+
+function helicopterTailIndices(){
+    return new Uint16Array([
+        0, 1, 2,
+        0, 2, 3,
+
+        4, 6, 5,
+        4, 7, 6,
+
+        0, 3, 7,
+        0, 7, 4,
+
+        1, 5, 6,
+        1, 6, 2,
+
+        3, 2, 6,
+        3, 6, 7,
+
+        0, 4, 5,
+        0, 5, 1
+    ])
+}
+
+// ==================================================
+// HELICOPTER PROPELLERS VERTICES
+// ==================================================
+
+function helicopterPropellersVertices(){
+
+    return new Float32Array([
+
+        // ==========================================
+        // PROPELLER 1
+        // Comprimento: 1.6
+        // Largura:     0.2
+        // Espessura:   0.05
+        // ==========================================
+
+        // Face inferior
+        -0.8, 0.30, -0.05,
+         0.8, 0.30, -0.05,
+         0.8, 0.30,  0.05,
+        -0.8, 0.30,  0.05,
+
+        // Face superior
+        -0.8, 0.35, -0.05,
+         0.8, 0.35, -0.05,
+         0.8, 0.35,  0.05,
+        -0.8, 0.35,  0.05,
+
+
+        // ==========================================
+        // PROPELLER 2
+        // Comprimento: 1.6
+        // Largura:     0.2
+        // Espessura:   0.1
+        // ==========================================
+
+        // Face inferior
+        -0.05, 0.35, -0.8,
+         0.05, 0.35, -0.8,
+         0.05, 0.35,  0.8,
+        -0.05, 0.35,  0.8,
+
+        // Face superior
+        -0.05, 0.4, -0.8,
+         0.05, 0.4, -0.8,
+         0.05, 0.4,  0.8,
+        -0.05, 0.4,  0.8
+    ]);
+}
+
+// ==================================================
+// HELICOPTER PROPELLERS COLORS
+// ==================================================
+
+function helicopterPropellersColors(){
+    return new Float32Array([
+        // Verde suave
+        0.4, 0.8, 0.4,
+        0.4, 0.8, 0.4,
+        0.4, 0.8, 0.4,
+        0.4, 0.8, 0.4,
+
+        0.4, 0.8, 0.4,
+        0.4, 0.8, 0.4,
+        0.4, 0.8, 0.4,
+        0.4, 0.8, 0.4,
+
+        // Ciano suave
+        0.4, 0.85, 0.85,
+        0.4, 0.85, 0.85,
+        0.4, 0.85, 0.85,
+        0.4, 0.85, 0.85,
+
+        0.4, 0.85, 0.85,
+        0.4, 0.85, 0.85,
+        0.4, 0.85, 0.85,
+        0.4, 0.85, 0.85
+    ]);
+}
+
+// ==================================================
+// HELICOPTER PROPELLERS INDICES
+// ==================================================
+
+function helicopterPropellersIndices(){
+
+    return new Uint16Array([
+
+        // ==========================================
+        // PROPELLER 1
+        // ==========================================
+
+        // Face inferior
+        0, 1, 2,
+        0, 2, 3,
+
+        // Face superior
+        4, 6, 5,
+        4, 7, 6,
+
+        // Frente
+        0, 4, 5,
+        0, 5, 1,
+
+        // Trás
+        3, 2, 6,
+        3, 6, 7,
+
+        // Esquerda
+        0, 3, 7,
+        0, 7, 4,
+
+        // Direita
+        1, 5, 6,
+        1, 6, 2,
+
+
+        // ==========================================
+        // PROPELLER 2
+        // ==========================================
+
+        // Face inferior
+        8, 9, 10,
+        8, 10, 11,
+
+        // Face superior
+        12, 14, 13,
+        12, 15, 14,
+
+        // Frente
+        8, 12, 13,
+        8, 13, 9,
+
+        // Trás
+        11, 10, 14,
+        11, 14, 15,
+
+        // Esquerda
+        8, 11, 15,
+        8, 15, 12,
+
+        // Direita
+        9, 13, 14,
+        9, 14, 10
+    ]);
+}
+
+// ==================================================
+// HELICOPTER TAIL PROPELLER VERTICES
+// ==================================================
+
+function helicopterTailPropellerVertices(){
+    return new Float32Array([
+
+        // ==========================================
+        // PÁ 1 — direção X
+        // ==========================================
+
+        // Face inferior
+        0.55, -0.025, 0.05,
+        0.85, -0.025, 0.05,
+        0.85,  0.025, 0.05,
+        0.55,  0.025, 0.05,
+
+        // Face superior
+        0.55, -0.025,  0.06,
+        0.85, -0.025,  0.06,
+        0.85,  0.025,  0.06,
+        0.55,  0.025,  0.06,
+
+
+        // ==========================================
+        // PÁ 2 — direção Y
+        // ==========================================
+
+        // Face inferior
+        0.675, -0.15, 0.06,
+        0.725, -0.15, 0.06,
+        0.725,  0.15, 0.06,
+        0.675,  0.15, 0.06,
+
+        // Face superior
+        0.675, -0.15,  0.07,
+        0.725, -0.15,  0.07,
+        0.725,  0.15,  0.07,
+        0.675,  0.15,  0.07
+    ]);
+}
+
+// ==================================================
+// HELICOPTER TAIL PROPELLER COLORS
+// ==================================================
+
+function helicopterTailPropellerColors(){
+
+    return new Float32Array([
+
+        // Pá 1
+        0.35, 0.75, 0.65,
+        0.35, 0.75, 0.65,
+        0.35, 0.75, 0.65,
+        0.35, 0.75, 0.65,
+
+        0.35, 0.75, 0.65,
+        0.35, 0.75, 0.65,
+        0.35, 0.75, 0.65,
+        0.35, 0.75, 0.65,
+
+        // Pá 2
+        0.35, 0.85, 0.85,
+        0.35, 0.85, 0.85,
+        0.35, 0.85, 0.85,
+        0.35, 0.85, 0.85,
+
+        0.35, 0.85, 0.85,
+        0.35, 0.85, 0.85,
+        0.35, 0.85, 0.85,
+        0.35, 0.85, 0.85
+    ]);
+}
+
+// ==================================================
+// HELICOPTER TAIL PROPELLER INDICES
+// ==================================================
+
+function helicopterTailPropellerIndices(){
+
+    return new Uint16Array([
+
+        // ==========================================
+        // PÁ 1
+        // ==========================================
+
+        // Frente
+        0, 1, 2,
+        0, 2, 3,
+
+        // Trás
+        4, 6, 5,
+        4, 7, 6,
+
+        // Lateral
+        0, 4, 5,
+        0, 5, 1,
+
+        // Lateral
+        3, 2, 6,
+        3, 6, 7,
+
+        // Lateral
+        0, 3, 7,
+        0, 7, 4,
+
+        // Lateral
+        1, 5, 6,
+        1, 6, 2,
+
+
+        // ==========================================
+        // PÁ 2
+        // ==========================================
+
+        // Frente
+        8, 9, 10,
+        8, 10, 11,
+
+        // Trás
+        12, 14, 13,
+        12, 15, 14,
+
+        // Lateral
+        8, 12, 13,
+        8, 13, 9,
+
+        // Lateral
+        11, 10, 14,
+        11, 14, 15,
+
+        // Lateral
+        8, 11, 15,
+        8, 15, 12,
+
+        // Lateral
+        9, 13, 14,
+        9, 14, 10
+    ]);
+}
+
+// ==================================================
+// GEOMETRY
+// ==================================================
+
+const helicopterBodyGeometry = {
+    vertices: helicopterBodyVertices(),
+    colors: helicopterBodyColors(),
+    indices: helicopterBodyIndices()
+};
+
+const helicopterTopShaftGeometry = {
+    vertices: helicopterTopShaftVertices(),
+    colors: helicopterTopShaftColors(),
+    indices: helicopterTopShaftIndices()
+};
+
+const helicopterTailGeometry = {
+    vertices: helicopterTailVertices(),
+    colors: helicopterTailColors(),
+    indices: helicopterTailIndices()
+};
+
+const helicopterPropellersGeometry = {
+    vertices: helicopterPropellersVertices(),
+    colors: helicopterPropellersColors(),
+    indices: helicopterPropellersIndices()
+};
+
+const helicopterTailPropellerGeometry = {
+    vertices: helicopterTailPropellerVertices(),
+    colors: helicopterTailPropellerColors(),
+    indices: helicopterTailPropellerIndices()
+};
+</script>
+
+<!-- ==================================================
+     RENDERER, OBJETOS, CENA E TECLADO
+     ================================================== -->
+<script>
+// ==================================================
+// SHADERS
+// ==================================================
+
+const canvas = document.getElementById("canvas");
+const gl = canvas.getContext("webgl2");
+
+if (!gl) {
+    throw new Error("WebGL 2 não é suportado.");
+}
+
+const vertexShaderSource = `#version 300 es
+
+in vec3 aPosition;
+in vec3 aColor;
+
+out vec3 vColor;
+
+uniform mat4 u_modelTransform;
+
+void main() {
+
+    vColor = aColor;
+    gl_Position =
+        u_modelTransform * vec4(aPosition, 1.0);
+}
+`;
+
+const fragmentShaderSource = `#version 300 es
+
+precision mediump float;
+
+in vec3 vColor;
+
+out vec4 outColor;
+
+void main() {
+
+    outColor =
+        vec4(vColor, 1.0);
+}
+`;
+
+function createShader(gl, type, source) {
+
+    const shader = gl.createShader(type);
+
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const error = gl.getShaderInfoLog(shader);
+        gl.deleteShader(shader);
+        throw new Error(error);
+    }
+
+    return shader;
+}
+
+function createProgram(gl, vertexShaderSource, fragmentShaderSource) {
+
+    const vertexShader =
+        createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+
+    const fragmentShader =
+        createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+    const program = gl.createProgram();
+
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(program));
+    }
+
+    return program;
+}
+
+// ==================================================
+// CLASSE RENDERER
+// ==================================================
+// Os buffers de cada objeto são enviados à GPU uma
+// única vez (VAO por objeto). A cada quadro só a matriz
+// de modelo muda.
+
+class Renderer {
+
+    constructor(gl, program) {
+
+        this.gl = gl;
+        this.program = program;
+
+        this.positionLocation =
+            gl.getAttribLocation(program, "aPosition");
+
+        this.colorLocation =
+            gl.getAttribLocation(program, "aColor");
+
+        this.modelTransformLocation =
+            gl.getUniformLocation(program, "u_modelTransform");
+    }
+
+    createVAO(object) {
+
+        const gl = this.gl;
+
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+
+        // Posições
+        gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+        gl.bufferData(gl.ARRAY_BUFFER, object.vertices, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(this.positionLocation);
+        gl.vertexAttribPointer(this.positionLocation, 3, gl.FLOAT, false, 0, 0);
+
+        // Cores
+        gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+        gl.bufferData(gl.ARRAY_BUFFER, object.colors, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(this.colorLocation);
+        gl.vertexAttribPointer(this.colorLocation, 3, gl.FLOAT, false, 0, 0);
+
+        // Índices
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, object.indices, gl.STATIC_DRAW);
+
+        gl.bindVertexArray(null);
+
+        return vao;
+    }
+
+    draw(object) {
+
+        const gl = this.gl;
+
+        if (!object.vao) {
+            object.vao = this.createVAO(object);
+        }
+
+        gl.bindVertexArray(object.vao);
+
+        gl.uniformMatrix4fv(
+            this.modelTransformLocation,
+            false,
+            object.modelTransform
+        );
+
+        gl.drawElements(
+            gl.TRIANGLES,
+            object.indices.length,
+            gl.UNSIGNED_SHORT,
+            0
+        );
+
+        gl.bindVertexArray(null);
+    }
+}
+
+// ==================================================
+// CLASS - SCENE OBJECT
+// ==================================================
+
+class SceneObject {
+
+    constructor(vertices, colors, indices) {
+
+        this.vertices = vertices;
+        this.colors = colors;
+        this.indices = indices;
+
+        this.modelTransform = m4.identity();
+        this.vao = null;
+    }
+
+    update(modelTransform) {
+        this.modelTransform = modelTransform;
+    }
+
+    draw(renderer) {
+        renderer.draw(this);
+    }
+}
+
+class HelicopterBody extends SceneObject {
+    constructor() {
+        super(
+            helicopterBodyGeometry.vertices,
+            helicopterBodyGeometry.colors,
+            helicopterBodyGeometry.indices
+        );
+    }
+}
+
+class HelicopterTopShaft extends SceneObject {
+    constructor() {
+        super(
+            helicopterTopShaftGeometry.vertices,
+            helicopterTopShaftGeometry.colors,
+            helicopterTopShaftGeometry.indices
+        );
+    }
+}
+
+class HelicopterTail extends SceneObject {
+    constructor() {
+        super(
+            helicopterTailGeometry.vertices,
+            helicopterTailGeometry.colors,
+            helicopterTailGeometry.indices
+        );
+    }
+}
+
+class HelicopterPropellers extends SceneObject {
+    constructor() {
+        super(
+            helicopterPropellersGeometry.vertices,
+            helicopterPropellersGeometry.colors,
+            helicopterPropellersGeometry.indices
+        );
+    }
+}
+
+class HelicopterTailPropeller extends SceneObject {
+    constructor() {
+        super(
+            helicopterTailPropellerGeometry.vertices,
+            helicopterTailPropellerGeometry.colors,
+            helicopterTailPropellerGeometry.indices
+        );
+    }
+}
+
+// ==================================================
+// TECLADO
+// ==================================================
+
+const keys = {
+    ArrowUp: false,
+    ArrowDown: false,
+    ArrowLeft: false,
+    ArrowRight: false
+};
+
+window.addEventListener("keydown", (event) => {
+    if (event.key in keys) {
+        keys[event.key] = true;
+        event.preventDefault(); // não rolar a página
+    }
+});
+
+window.addEventListener("keyup", (event) => {
+    if (event.key in keys) {
+        keys[event.key] = false;
+        event.preventDefault();
+    }
+});
+
+// Se a janela perder o foco, soltar todas as teclas
+window.addEventListener("blur", () => {
+    for (const key in keys) keys[key] = false;
+});
+
+// ==================================================
+// UTILITÁRIOS
+// ==================================================
+
+// Multiplica as matrizes na ordem escrita:
+// compose(A, B, C) = A * B * C
+// (o vértice é transformado primeiro por C, depois B, depois A)
+function compose(...matrices) {
+    return matrices.reduce((acc, m) => m4.multiply(acc, m));
+}
+
+// Aproxima "current" de "target" de forma suave e
+// independente da taxa de quadros.
+function approach(current, target, rate, dt) {
+    return current + (target - current) * (1 - Math.exp(-rate * dt));
+}
+
+// ==================================================
+// CLASS - SCENE
+// ==================================================
+
+// Centro do rotor de cauda (no espaço do modelo)
+const TAIL_ROTOR_CENTER = [0.7, 0.0, 0.06];
+
+class Scene {
+
+    constructor(gl, program) {
+
+        this.renderer = new Renderer(gl, program);
+
+        this.helicopterBody = new HelicopterBody();
+        this.helicopterTopShaft = new HelicopterTopShaft();
+        this.helicopterTail = new HelicopterTail();
+        this.helicopterPropellers = new HelicopterPropellers();
+        this.helicopterTailPropeller = new HelicopterTailPropeller();
+
+        // ---------- Posição / movimento ----------
+        this.x = 0.0;
+        this.y = 0.0;
+        this.vx = 0.0;
+        this.vy = 0.0;
+
+        this.maxSpeed = 0.9;   // unidades de clip space por segundo
+        this.scale = 0.35;     // tamanho do helicóptero na tela
+        this.limit = 1.0 - 0.8 * this.scale - 0.02; // mantém o rotor dentro do canvas
+
+        // ---------- Orientação ----------
+        // Modelo original: bico em -X, cauda em +X.
+        // yaw = 0 -> olhando para a esquerda; yaw = PI -> para a direita.
+        this.yaw = 0.0;
+        this.targetYaw = 0.0;
+        this.tilt = 0.0;       // inclinação do bico para frente
+        this.bank = 0.0;       // pequena inclinação ao subir/descer
+
+        // ---------- Hélices ----------
+        this.rotorAngle = 0.0;     // hélice superior
+        this.tailAngle = 0.0;      // hélice da cauda
+        this.rotorSpeed = 14.0;    // rad/s (valor atual, suavizado)
+
+        // Câmera fixa: leve inclinação para ver o topo e a lateral
+        this.view = compose(
+            m4.xRotation(0.35),
+            m4.yRotation(-0.45)
+        );
+
+        // WebGL usa z = -1 perto e z = +1 longe; invertendo z
+        // o lado +z do modelo fica voltado para o observador.
+        this.flipZ = m4.scaling(1, 1, -1);
+
+        this.info = document.getElementById("info");
+        this.lastTime = null;
+    }
+
+    handleInput(dt) {
+
+        const dirX = (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0);
+        const dirY = (keys.ArrowUp ? 1 : 0) - (keys.ArrowDown ? 1 : 0);
+
+        // Velocidade com aceleração/desaceleração suave
+        this.vx = approach(this.vx, dirX * this.maxSpeed, 5.0, dt);
+        this.vy = approach(this.vy, dirY * this.maxSpeed, 5.0, dt);
+
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+
+        // Mantém o helicóptero dentro da tela
+        if (Math.abs(this.x) > this.limit) {
+            this.x = Math.sign(this.x) * this.limit;
+            this.vx = 0;
+        }
+        if (Math.abs(this.y) > this.limit) {
+            this.y = Math.sign(this.y) * this.limit;
+            this.vy = 0;
+        }
+
+        // Vira o bico para o lado em que está andando
+        if (dirX < 0) this.targetYaw = 0.0;
+        if (dirX > 0) this.targetYaw = Math.PI;
+        this.yaw = approach(this.yaw, this.targetYaw, 6.0, dt);
+
+        // Inclina o bico para baixo proporcional à velocidade horizontal
+        const horizontal = Math.abs(this.vx) / this.maxSpeed;
+        this.tilt = approach(this.tilt, 0.28 * horizontal, 8.0, dt);
+
+        // Pequeno "empinar" ao subir e "mergulhar" ao descer
+        this.bank = approach(this.bank, -0.08 * (this.vy / this.maxSpeed), 6.0, dt);
+
+        // ---------- Velocidade das hélices ----------
+        // Parado:        rotação de cruzeiro
+        // Subindo:       mais sustentação -> gira mais rápido
+        // Descendo:      menos sustentação -> gira mais devagar
+        // Andando lado:  precisa de mais empuxo -> gira mais rápido
+        let target = 14.0;
+        target += 8.0 * Math.max(0, this.vy / this.maxSpeed);
+        target -= 5.0 * Math.max(0, -this.vy / this.maxSpeed);
+        target += 5.0 * horizontal;
+
+        this.rotorSpeed = approach(this.rotorSpeed, target, 3.0, dt);
+
+        // A hélice da cauda (anti-torque) acompanha a hélice principal
+        const tailSpeed = this.rotorSpeed * 1.5;
+
+        this.rotorAngle = (this.rotorAngle + this.rotorSpeed * dt) % (2 * Math.PI);
+        this.tailAngle = (this.tailAngle + tailSpeed * dt) % (2 * Math.PI);
+
+        return tailSpeed;
+    }
+
+    update(dt) {
+
+        const tailSpeed = this.handleInput(dt);
+
+        // Transformação do helicóptero inteiro (corpo)
+        const base = compose(
+            this.flipZ,
+            m4.translation(this.x, this.y, 0),
+            this.view,
+            m4.yRotation(this.yaw),
+            m4.zRotation(this.tilt + this.bank),
+            m4.scaling(this.scale, this.scale, this.scale)
+        );
+
+        // Peças fixas ao corpo
+        this.helicopterBody.update(base);
+        this.helicopterTopShaft.update(base);
+        this.helicopterTail.update(base);
+
+        // Hélice superior: gira em torno do eixo Y (a haste passa pela origem)
+        this.helicopterPropellers.update(
+            compose(base, m4.yRotation(this.rotorAngle))
+        );
+
+        // Hélice da cauda: leva o centro à origem, gira em Z e volta
+        const [cx, cy, cz] = TAIL_ROTOR_CENTER;
+        this.helicopterTailPropeller.update(
+            compose(
+                base,
+                m4.translation(cx, cy, cz),
+                m4.zRotation(this.tailAngle),
+                m4.translation(-cx, -cy, -cz)
+            )
+        );
+
+        const rpm = (w) => Math.round(w * 60 / (2 * Math.PI));
+        this.info.textContent =
+            `posição (${this.x.toFixed(2)}, ${this.y.toFixed(2)})  ·  ` +
+            `hélice superior ${rpm(this.rotorSpeed)} rpm  ·  ` +
+            `hélice da cauda ${rpm(tailSpeed)} rpm`;
+    }
+
+    draw() {
+
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.useProgram(this.renderer.program);
+
+        this.helicopterBody.draw(this.renderer);
+        this.helicopterTopShaft.draw(this.renderer);
+        this.helicopterTail.draw(this.renderer);
+        this.helicopterPropellers.draw(this.renderer);
+        this.helicopterTailPropeller.draw(this.renderer);
+    }
+
+    execute(time) {
+
+        if (this.lastTime === null) this.lastTime = time;
+
+        // delta time em segundos (limitado para evitar saltos
+        // quando a aba volta a ficar visível)
+        const dt = Math.min((time - this.lastTime) / 1000, 0.05);
+        this.lastTime = time;
+
+        this.update(dt);
+        this.draw();
+
+        requestAnimationFrame((t) => this.execute(t));
+    }
+
+    init() {
+        requestAnimationFrame((t) => this.execute(t));
+    }
+}
+
+// ==================================================
+// CONFIGURAÇÃO INICIAL DO WEBGL
+// ==================================================
+
+const program =
+    createProgram(gl, vertexShaderSource, fragmentShaderSource);
+
+gl.clearColor(0.1, 0.1, 0.1, 1.0);
+gl.viewport(0, 0, canvas.width, canvas.height);
+gl.enable(gl.DEPTH_TEST);
+
+// ==================================================
+// CRIAR CENA E INICIAR ANIMAÇÃO
+// ==================================================
+
+const scene = new Scene(gl, program);
+scene.init();
+</script>
+
+</body>
+</html>

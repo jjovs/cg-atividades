@@ -11,6 +11,7 @@ Atividades da disciplina de **Computação Gráfica**.
 | 3 | Retas e triângulos com Bresenham | [`exercicio2-bresenham-triangulo.html`](exercicio2-bresenham-triangulo.html) | [abrir](https://jjovs.github.io/cg-atividades/exercicio2-bresenham-triangulo.html) |
 | 4 | Pong | [`pong-webgl.html`](pong-webgl.html) | [abrir](https://jjovs.github.io/cg-atividades/pong-webgl.html) |
 | 5 | Robô animado | [`robo-animado.html`](robo-animado.html) | [abrir](https://jjovs.github.io/cg-atividades/robo-animado.html) |
+| 6 | Helicóptero | [`helicoptero.html`](helicoptero.html) | [abrir](https://jjovs.github.io/cg-atividades/helicoptero.html) |
 
 ---
 
@@ -67,3 +68,32 @@ Jogo com transformações 2D aplicadas por matrizes 3×3
 - Posicionamento de cada objeto por matriz de translação (`m3.translation`),
   recalculada a cada quadro.
 - Cor de cada objeto definida por um `uniform vec3` no fragment shader.
+
+### 6. Helicóptero
+
+Helicóptero 3D (WebGL 2, matrizes 4×4 `m4`) montado a partir do
+[exemplo da disciplina](https://github.com/martinslemosana/cg-02-2026/tree/main/helicoptero),
+movimentado pelo teclado.
+
+**Controles**
+
+| Ação | Tecla |
+|---|---|
+| Subir / descer | `↑` / `↓` |
+| Esquerda / direita | `←` / `→` |
+
+**Comportamento**
+
+- As duas hélices giram continuamente, parado ou em movimento:
+  - **hélice superior**: gira em torno do eixo Y (a haste passa pela origem);
+  - **hélice da cauda**: é levada à origem, gira em Z e volta ao lugar
+    (`T(c) · Rz(θ) · T(-c)`).
+- A rotação acompanha o movimento: acelera ao subir e ao andar para os lados,
+  desacelera ao descer. A hélice da cauda (anti-torque) gira sempre 1,5× mais
+  rápido que a principal. As rotações por minuto aparecem abaixo do canvas.
+- O helicóptero vira o bico para o lado em que está andando e inclina o bico
+  para baixo proporcionalmente à velocidade horizontal.
+- Aceleração e frenagem suaves, com **delta time**, e limites para não sair da tela.
+- Hierarquia de transformações:
+  `corpo = T(posição) · câmera · Ry(direção) · Rz(inclinação) · S`;
+  cada hélice aplica a sua rotação sobre a matriz do corpo.
